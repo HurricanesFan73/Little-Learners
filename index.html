@@ -251,6 +251,7 @@ function viewWeek(){
     h+='</div>';
   });
   h+='<div class="btns" style="margin-bottom:6px"><button class="btn ghost" data-act="wnew">🔀 Start a fresh plan</button></div>';
+  h+='<div class="btns" style="margin-bottom:6px"><button class="btn" data-act="send">📤 Send update</button><button class="btn ghost" data-act="pastemerge">📋 Paste &amp; merge</button></div>';
   h+='<p class="note">Ticking an activity also counts it on the Progress tab. New plans favor activities you haven’t done as much yet. A new plan appears automatically each Monday.</p>';
   return h;
 }
@@ -290,6 +291,7 @@ document.addEventListener("click",function(e){
   else if(act==="liveoff"){PCFG=null;try{localStorage.removeItem("ll_pantry");}catch(e){}LIVE.status="off";}
   else if(act==="sharelive"){doShare("live");}
   else if(act==="syncnow"){liveSync();}
+  else if(act==="pastemerge"){doPasteMerge();}
   else if(act==="livetest"){liveTest();}
   afterAct(act);
   var y=window.scrollY;render();if(act==="done"||act==="child"||act==="subj"||act==="asubj"||act==="found"||act==="shuffle"||act==="wk"||act==="wswap"||act==="wnew"||act==="wplus"||act==="wminus"||act==="padd"||act==="wrm"||act==="psubj")window.scrollTo(0,y);
@@ -390,11 +392,17 @@ function shareBase(){return location.href.split("#")[0];}
 function doShare(kind){
   if(kind==="send"&&!CODE){toast("Getting your update ready — tap again.");refreshCode();return;}
   var url=kind==="live"?shareBase()+"#pantry="+encodeURIComponent(PCFG.id):shareBase()+"#sync="+CODE;
-  var text=kind==="live"?"Tap to connect Little Learners to our shared plan 🧩":"Our latest Little Learners plan 🧩 Tap to merge it.";
+  var text=kind==="live"?"Tap to connect Little Learners to our shared plan 🧩":"Our latest Little Learners plan 🧩 To merge: copy this message, open the app, tap the chip at the top, then Paste & merge.";
   S.code=url;
-  if(navigator.share){try{navigator.share({title:"Little Learners",text:text,url:url}).catch(function(){});return;}catch(e){}}
+  if(navigator.share){try{navigator.share(kind==="live"?{title:"Little Learners",text:text,url:url}:{title:"Little Learners",text:text+"\n"+url}).catch(function(){});return;}catch(e){}}
   S.showCode=true;
   try{navigator.clipboard.writeText(url).then(function(){toast("Link copied — paste it into a message.");});}catch(e){}
+}
+async function doPasteMerge(){
+  var t="";
+  try{t=await navigator.clipboard.readText();}catch(e){toast("Couldn’t read the clipboard — paste into the box instead.");return;}
+  try{var st=await decodeState(t);var ch=adopt(mergeState(exportState(),sanitize(st)));toast(ch?"Merged ✓ Your plan is up to date.":"Already up to date ✓");}
+  catch(e){toast("The clipboard doesn’t hold an update. Copy the message first.");}
 }
 async function doMerge(){
   var el=document.getElementById("paste"),txt=el?el.value:"";
@@ -488,11 +496,11 @@ function topBar(){return (S.toast?'<div class="toast">'+esc(S.toast)+'</div>':''
 function paintChip(){var el=document.getElementById("chip");if(el)el.textContent=chipText();var l=document.getElementById("lstat");if(l)l.textContent=liveLine();}
 function viewSync(){
   var h='<button class="back" data-act="tab" data-v="today">← Back</button><h1>Sync two phones</h1><p class="sub">No accounts needed for the second phone. Pick the way that suits you.</p>';
-  h+='<div class="card"><div class="ttl">1 · Quick send (no setup)</div><p class="meta" style="font-size:13px;margin:4px 0 0">Tap send, text the link to your wife, and she taps it. Her phone merges your ticks and plan. She can send hers back the same way.</p><div class="btns"><button class="btn" data-act="send">📤 Send my update</button></div>';
+  h+='<div class="card"><div class="ttl">1 · Quick send (no setup)</div><p class="meta" style="font-size:13px;margin:4px 0 0">Tap send and text it to your wife. On her phone she copies the message, opens the app, taps the chip at the top, then <b>Paste &amp; merge</b>. She can send hers back the same way.</p><div class="btns"><button class="btn" data-act="send">📤 Send my update</button></div>';
   if(S.showCode&&S.code)h+='<textarea readonly onclick="this.select()">'+esc(S.code)+'</textarea>';
   h+='</div>';
-  h+='<div class="card"><div class="ttl">Got an update?</div><p class="meta" style="font-size:13px;margin:4px 0 0">Tapping a link merges it automatically. Or paste a link or code here.</p><textarea id="paste" placeholder="Paste link or code"></textarea><div class="btns"><button class="btn ghost" data-act="merge">Merge it</button></div></div>';
-  h+='<div class="card"><div class="ttl">2 · Live sync (optional, one-time setup)</div>';
+  h+='<div class="card"><div class="ttl">Got an update?</div><p class="meta" style="font-size:13px;margin:4px 0 0">Copy the message you were sent, then tap Paste &amp; merge. Or paste it into the box.</p><textarea id="paste" placeholder="Paste link or code"></textarea><div class="btns"><button class="btn" data-act="pastemerge">📋 Paste &amp; merge</button><button class="btn ghost" data-act="merge">Merge the box</button></div></div>';
+  h+='<div class="card"><div class="ttl">2 · Live sync (experimental — failed in testing)</div>';
   if(PCFG){
     h+='<p class="meta" id="lstat" style="font-size:13px;margin:4px 0 0">'+esc(liveLine())+'</p>'+(S.diag?'<pre style="white-space:pre-wrap;word-break:break-word;font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px;margin:8px 0 0">'+esc(S.diag.join("\n"))+'</pre>':'')+'<div class="btns"><button class="btn" data-act="sharelive">📤 Send setup link to your wife</button><button class="btn ghost" data-act="syncnow">Sync now</button><button class="btn ghost" data-act="livetest">Test connection</button><button class="btn ghost" data-act="liveoff">Turn off</button></div>';
   }else{
