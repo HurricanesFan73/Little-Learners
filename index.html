@@ -407,6 +407,20 @@ function loadPantry(){try{var v=localStorage.getItem("ll_pantry");if(v)return JS
 function savePantry(c){try{localStorage.setItem("ll_pantry",JSON.stringify(c));}catch(e){}}
 var PCFG=loadPantry(),LIVE={status:PCFG?"idle":"off",last:0,err:""},syncing=false,dirty=false,stimer=null;
 function pUrl(){return "https://getpantry.cloud/apiv1/pantry/"+encodeURIComponent(PCFG.id)+"/basket/"+encodeURIComponent(PCFG.basket||"littlelearners");}
+async function pWrite(){
+  var st=exportState();st.stamp=Date.now();var out=JSON.stringify(st);
+  try{
+    var w=await fetch(pUrl(),{method:"POST",headers:{"Content-Type":"application/json"},body:out});
+    if(!w.ok)throw new Error("HTTP "+w.status);
+    return;
+  }catch(e){if(!(e instanceof TypeError))throw e;}
+  /* workaround: send without reading the reply, then read back to confirm it landed */
+  await fetch(pUrl(),{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain"},body:out});
+  var r=await fetch(pUrl(),{headers:{"Accept":"application/json"}});
+  if(!r.ok)throw new Error("write did not land (HTTP "+r.status+")");
+  var back=await r.json();
+  if(!back||back.stamp!==st.stamp)throw new Error("write did not land");
+}
 async function liveSync(){
   if(!PCFG)return;
   if(syncing){dirty=true;return;}
@@ -425,10 +439,7 @@ async function liveSync(){
     if(blocked&&PCFG.seen)throw new Error("couldn’t read the shared plan (network or blocked)");
     adopt(remote&&remote.progress?mergeState(exportState(),sanitize(remote)):exportState());
     step="saving";
-    var out=JSON.stringify(exportState()),w;
-    try{w=await fetch(pUrl(),{method:"POST",headers:{"Content-Type":"application/json"},body:out});}
-    catch(e){if(!(e instanceof TypeError))throw e;w=await fetch(pUrl(),{method:"POST",headers:{"Content-Type":"text/plain"},body:out});}
-    if(!w.ok)throw new Error("HTTP "+w.status);
+    await pWrite();
     PCFG.seen=true;savePantry(PCFG);
     LIVE.status="ok";LIVE.last=Date.now();LIVE.err="";
   }catch(e){LIVE.status="error";LIVE.err=step+": "+String((e&&e.message)||e);}
@@ -447,6 +458,9 @@ async function liveTest(){
   await tr("1 Read plan",base+"littlelearners",{headers:{"Accept":"application/json"}});
   await tr("2 Write (json)",base+"ping",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({t:Date.now()})});
   await tr("3 Write (plain)",base+"ping",{method:"POST",headers:{"Content-Type":"text/plain"},body:JSON.stringify({t:Date.now()})});
+  try{await fetch(base+"ping",{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain"},body:JSON.stringify({t:"nocors-"+Date.now()})});lines.push("4 Write (no-cors): sent");}
+  catch(e){lines.push("4 Write (no-cors): failed ("+((e&&e.message)||e)+")");}
+  await tr("5 Read back",base+"ping",{headers:{"Accept":"application/json"}});
   S.diag=lines;render();
 }
 function scheduleSync(ms){if(!PCFG)return;clearTimeout(stimer);stimer=setTimeout(liveSync,ms==null?1500:ms);}
