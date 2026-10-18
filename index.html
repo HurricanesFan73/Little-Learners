@@ -290,6 +290,7 @@ document.addEventListener("click",function(e){
   else if(act==="liveoff"){PCFG=null;try{localStorage.removeItem("ll_pantry");}catch(e){}LIVE.status="off";}
   else if(act==="sharelive"){doShare("live");}
   else if(act==="syncnow"){liveSync();}
+  else if(act==="livetest"){liveTest();}
   afterAct(act);
   var y=window.scrollY;render();if(act==="done"||act==="child"||act==="subj"||act==="asubj"||act==="found"||act==="shuffle"||act==="wk"||act==="wswap"||act==="wnew"||act==="wplus"||act==="wminus"||act==="padd"||act==="wrm"||act==="psubj")window.scrollTo(0,y);
 });
@@ -409,19 +410,44 @@ function pUrl(){return "https://getpantry.cloud/apiv1/pantry/"+encodeURIComponen
 async function liveSync(){
   if(!PCFG)return;
   if(syncing){dirty=true;return;}
-  syncing=true;LIVE.status="syncing";paintChip();
+  syncing=true;LIVE.status="syncing";LIVE.err="";paintChip();
+  var step="reading";
   try{
-    var remote=null,r=await fetch(pUrl(),{headers:{"Accept":"application/json"}});
-    if(r.ok){remote=await r.json();}else if(r.status!==400&&r.status!==404){throw new Error("HTTP "+r.status);}
-    var cur=exportState();
-    adopt(remote&&remote.progress?mergeState(cur,sanitize(remote)):cur);
-    var w=await fetch(pUrl(),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(exportState())});
+    var remote=null,blocked=false;
+    try{
+      var r=await fetch(pUrl(),{headers:{"Accept":"application/json"}});
+      if(r.ok){remote=await r.json();PCFG.seen=true;savePantry(PCFG);}
+      else if(r.status!==400&&r.status!==404){throw new Error("HTTP "+r.status);}
+    }catch(e){
+      if(!(e instanceof TypeError))throw e;
+      blocked=true;
+    }
+    if(blocked&&PCFG.seen)throw new Error("couldn’t read the shared plan (network or blocked)");
+    adopt(remote&&remote.progress?mergeState(exportState(),sanitize(remote)):exportState());
+    step="saving";
+    var out=JSON.stringify(exportState()),w;
+    try{w=await fetch(pUrl(),{method:"POST",headers:{"Content-Type":"application/json"},body:out});}
+    catch(e){if(!(e instanceof TypeError))throw e;w=await fetch(pUrl(),{method:"POST",headers:{"Content-Type":"text/plain"},body:out});}
     if(!w.ok)throw new Error("HTTP "+w.status);
+    PCFG.seen=true;savePantry(PCFG);
     LIVE.status="ok";LIVE.last=Date.now();LIVE.err="";
-  }catch(e){LIVE.status="error";LIVE.err=String((e&&e.message)||e);}
+  }catch(e){LIVE.status="error";LIVE.err=step+": "+String((e&&e.message)||e);}
   syncing=false;
   if(dirty){dirty=false;scheduleSync(800);}
   paintChip();
+}
+async function liveTest(){
+  if(!PCFG)return;
+  S.diag=["Testing…"];render();
+  var lines=[],base="https://getpantry.cloud/apiv1/pantry/"+encodeURIComponent(PCFG.id)+"/basket/";
+  async function tr(label,url,opt){
+    try{var r=await fetch(url,opt),t="";try{t=(await r.text()).slice(0,70);}catch(e){}lines.push(label+": HTTP "+r.status+(t?" — "+t:""));}
+    catch(e){lines.push(label+": failed ("+((e&&e.message)||e)+")");}
+  }
+  await tr("1 Read plan",base+"littlelearners",{headers:{"Accept":"application/json"}});
+  await tr("2 Write (json)",base+"ping",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({t:Date.now()})});
+  await tr("3 Write (plain)",base+"ping",{method:"POST",headers:{"Content-Type":"text/plain"},body:JSON.stringify({t:Date.now()})});
+  S.diag=lines;render();
 }
 function scheduleSync(ms){if(!PCFG)return;clearTimeout(stimer);stimer=setTimeout(liveSync,ms==null?1500:ms);}
 document.addEventListener("visibilitychange",function(){if(!document.hidden)scheduleSync(200);});
@@ -454,7 +480,7 @@ function viewSync(){
   h+='<div class="card"><div class="ttl">Got an update?</div><p class="meta" style="font-size:13px;margin:4px 0 0">Tapping a link merges it automatically. Or paste a link or code here.</p><textarea id="paste" placeholder="Paste link or code"></textarea><div class="btns"><button class="btn ghost" data-act="merge">Merge it</button></div></div>';
   h+='<div class="card"><div class="ttl">2 · Live sync (optional, one-time setup)</div>';
   if(PCFG){
-    h+='<p class="meta" id="lstat" style="font-size:13px;margin:4px 0 0">'+esc(liveLine())+'</p><div class="btns"><button class="btn" data-act="sharelive">📤 Send setup link to your wife</button><button class="btn ghost" data-act="syncnow">Sync now</button><button class="btn ghost" data-act="liveoff">Turn off</button></div>';
+    h+='<p class="meta" id="lstat" style="font-size:13px;margin:4px 0 0">'+esc(liveLine())+'</p>'+(S.diag?'<pre style="white-space:pre-wrap;word-break:break-word;font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px;margin:8px 0 0">'+esc(S.diag.join("\n"))+'</pre>':'')+'<div class="btns"><button class="btn" data-act="sharelive">📤 Send setup link to your wife</button><button class="btn ghost" data-act="syncnow">Sync now</button><button class="btn ghost" data-act="livetest">Test connection</button><button class="btn ghost" data-act="liveoff">Turn off</button></div>';
   }else{
     h+='<ol style="padding-left:20px;font-size:13px;color:var(--mute);margin:6px 0"><li>On getpantry.cloud, make a free Pantry (a name and email). Copy its Pantry ID.</li><li>Paste it below and tap Connect.</li><li>Tap “Send setup link” and message it to your wife. One tap on her phone connects it.</li></ol><input type="text" id="pid" placeholder="Pantry ID" autocapitalize="off" autocomplete="off" spellcheck="false"><div class="btns"><button class="btn" data-act="liveon">Connect</button></div>';
   }
